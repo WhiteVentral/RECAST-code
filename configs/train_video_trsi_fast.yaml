@@ -1,0 +1,284 @@
+# RECAST training on four nodes with eight GPUs each.
+
+data:
+  train_files: data/json_data/STGR-RL.json
+  val_files: ""
+  dataset_format: stgr
+  media_root: data
+  stgr_frame_cache_dir: null
+  stgr_frame_cache_required: false
+
+  prompt_key: question
+  answer_key: answer
+  image_key: images
+  video_key: videos
+
+  video_fps: 2.0
+  video_max_frames: 16
+  max_prompt_length: 16384
+  max_response_length: 1024  # Also applies to Route C.
+  truncation: left
+  image_min_pixels: 3136
+  image_max_pixels: 401408
+  video_min_pixels: 100352
+  video_max_pixels: 100352
+  filter_overlong_prompts: false
+
+  rollout_batch_size: 64  # fast: 8 rows per GPU (base 16 prompts, 2 rows per GPU)
+  mini_rollout_batch_size: null
+  shuffle: true
+  seed: 1
+  dataloader_num_workers: 16
+  dataloader_prefetch_factor: 1
+  dataloader_persistent_workers: true
+  dataloader_resume_mode: logical
+
+algorithm:
+  adv_estimator: grpo
+  grpo_eps: 1.0e-4
+  disable_kl: true
+  use_kl_loss: false
+  kl_coef: 0.0
+  online_filtering: false
+  pipeline_reward: false
+
+rsi:
+  # Route A: q = softmax[log p_theta+ + clip(alpha * (log p_theta+ - log p_theta-), -c, c)],
+  # mixed with the base teacher by beta.  route: base disables the correction
+  # (Delta = 0) while keeping chunking, credit and the schedule unchanged.
+  route: A
+  # alternating = schedule 2 (task phase -> snapshot -> distillation phase);
+  # joint = schedule 1 (teacher refresh every stage; every step uses the
+  # teacher as sd_mode says: reweighted GRPO, or L_task + sd_coef * L_SD).
+  schedule: alternating
+  task_steps_per_round: 12  # fast: 12 x 64 = 768 prompts per phase (base 50 x 16 = 800)
+  distill_steps_per_round: 12  # fast
+  joint_stage_steps: 25  # fast: same data per stage as 100 x 16
+  sd_coef: 1.0  # lambda_SD of the joint schedule with sd_mode: surrogate only
+  # How teacher-guided steps use the teacher.
+  # reweight: GRPO on the task reward, each token's advantage multiplied by
+  # clip(exp(sign(A) * (G - Gbar)), 1 - c, 1 + c), G = the chunk credit of the
+  # Route-A teacher, Gbar its mean over the response (the RLSD form MeSD
+  # used): the reward sets the sign of every update and how much each
+  # response is pushed, the teacher moves weight between its chunks.
+  # surrogate: the L_SD surrogate of method section 12 (packages v1-v4; the
+  # teacher alone sets the direction of a distillation phase).
+  # reweight_clip: c (0 = plain GRPO on those steps).  reweight_center: row
+  # subtracts the response-wide mean credit; none uses uncentered credit.
+  sd_mode: reweight
+  reweight_clip: 0.2
+  reweight_center: row
+  # Route C implements ODR on teacher-guided steps.
+  # Before each update, every row with distillation targets is branched at most once,
+  # at the position of its least absorbed chunk: the largest gap u (nats)
+  # between the teacher's and the student's distributions over the student's
+  # top route_c_candidates tokens (and the rest of the vocabulary).  From the
+  # prefix plus each candidate the student samples route_c_continuations
+  # continuations, scored with the task reward: Q per candidate, Q0 their
+  # student-weighted mean.  The student is trained toward
+  # student * exp(kappa * w * clip(Q - Q0, +-value_clip)) there, with weight
+  # route_c_coef. Set inner_loop to none to disable it.
+  inner_loop: route_c
+  route_c_candidates: 4
+  route_c_continuations: 2
+  route_c_min_gap: 0.05
+  route_c_min_coverage: 0.5
+  route_c_value_clip: 1.0
+  route_c_kappa: 1.0
+  route_c_coef: 1.0
+
+  extrapolation_alpha: 0.5
+  extrapolation_alpha_decay: 1.0
+  extrapolation_alpha_min: 0.0
+  correction_clip: 1.0
+  base_mix_beta: 1.0
+  teacher_temperature: 1.0
+  min_task_signal_steps: 1
+
+  views: [answer, temporal, spatial]
+  teacher_max_prompt_length: 18432
+  teacher_fp32_logits: true
+  teacher_vocab_chunk: 65536  # fast: memory setting only
+  teacher_position_chunk: 768  # fast: memory setting only, not the response limit
+
+  chunk_min_tokens: 4
+  chunk_max_tokens: 128
+  chunk_fallback_tokens: 32
+
+  credit_horizon: 2
+  credit_discount: 0.8
+  credit_clip: 1.0
+
+  task_clip_low: 0.2
+  task_clip_high: 0.2
+  sd_clip_low: 0.2
+  sd_clip_high: 0.2
+
+  # GRPO loss aggregation: seq_mean_token_mean = MeSD's per-response mean
+  # (package v5; MeSD trained a full epoch with it); token_mean = the token
+  # mean of package v4, under which a response's weight grows with its length,
+  # so long responses dominate the update while lengths run away.
+  task_loss_agg: seq_mean_token_mean
+  # v7 training protocol: true length-truncated responses get effective reward 0
+  # before GRPO normalization and Route C Q estimation; raw scores stay unchanged.
+  # Requires generation termination metadata, not just response length.
+  zero_truncated_rewards: true
+  # Floor on the group std of the GRPO advantage (0: GRPO's std + eps).  Not
+  # used yet; 0.1 would scale down groups whose rewards differ only by noise.
+  task_adv_std_floor: 0.0
+  # New sampling noise every step (was: the same rollout.n seeds every step).
+  rollout_seed_mode: per_step
+  # Truncated importance weights min(pi_old / pi_vllm, C) (needs
+  # worker.rollout.calculate_log_probs); off: the mismatch is only measured.
+  rollout_correction: none
+  rollout_correction_cap: 2.0
+  # KL(pi_theta || pi_SFT) per response token, token mean, every update: the
+  # stabilizer of Open-o3 Video's own RL recipe (beta 0.04).  Reported as k3;
+  # its gradient is k2's, which stays non-zero when a token drifts far from
+  # the SFT model.  0 = the method as first specified (no reference model).
+  ref_kl_coef: 0.04
+  ref_kl_monitor: false
+  # Unhealthy step: format rate < 0.5, mean response length < 32 tokens,
+  # more than 25% of the responses truncated, or a KL to the SFT model above
+  # the larger of 0.3 and 2.5 x its median over the previous 20 steps.  The
+  # run stops when 3 of the last 4 steps were unhealthy, the current one
+  # included (guard_patience 0: never; guard_window 3: consecutive steps only,
+  # as in package v4).
+  health_min_format_rate: 0.5
+  health_min_response_length: 32.0
+  health_max_truncated_fraction: 0.25
+  health_ref_kl_jump_ratio: 2.5
+  health_ref_kl_jump_floor: 0.3
+  health_ref_kl_window: 20
+  guard_patience: 3
+  guard_window: 4
+  # A task phase whose format rate fell by > 0.1, whose mean length fell or
+  # rose by > 50%, or whose truncated fraction rose by > 0.1 (first vs last 5
+  # steps) does not become the next teacher: the version keeps the anchor
+  # student as its base, without correction.
+  teacher_health_gate: true
+  teacher_health_window: 5
+  teacher_health_max_format_drop: 0.1
+  teacher_health_max_length_drop: 0.5
+  teacher_health_max_length_rise: 0.5
+  teacher_health_max_truncation_rise: 0.1
+  # Decoded rollouts in <run_dir>/logs/rollouts/ (every unhealthy step too).
+  dump_rollouts_interval: 10
+  dump_rollouts_rows: 8
+  # Protocol keys that may differ when resuming.
+  resume_allow_changes: []
+
+  verify_fields: true
+  verify_time_tolerance: 1.0
+  verify_supported_iou: 0.5
+
+  log_chunk_examples: 2
+  log_chunk_interval: 12  # fast: once per round, as 50 in the base config
+
+worker:
+  actor:
+    global_batch_size: 16  # 16 prompts x 4 = 64 rows per optimizer step, as in the base config
+    micro_batch_size_per_device_for_update: 2  # fast: one forward/backward per optimizer step
+    micro_batch_size_per_device_for_experience: 4  # fast: 4 rows per forward (old log-probs, teacher scoring)
+    max_token_len_per_gpu: 24576
+    ppo_epochs: 1
+    max_grad_norm: 5.0
+    padding_free: true
+    dynamic_batching: false
+    ulysses_size: 1
+    use_torch_compile: true
+
+    model:
+      model_path: marinero4972/Open-o3-Video-SFT-7B
+      tokenizer_path: null
+      enable_gradient_checkpointing: true
+      trust_remote_code: true
+      freeze_vision_tower: false
+
+    optim:
+      lr: 1.0e-6
+      betas: [0.9, 0.999]
+      weight_decay: 0.01
+      strategy: adamw
+      lr_warmup_ratio: 0.0
+      lr_scheduler_type: cosine
+
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: false
+      enable_rank0_init: true
+      torch_dtype: fp32
+      mp_param_dtype: bf16
+      mp_reduce_dtype: fp32
+      mp_buffer_dtype: fp32
+
+    offload:
+      offload_params: false
+      offload_optimizer: false
+
+  rollout:
+    name: vllm
+    n: 4
+    temperature: 1.0
+    top_p: 0.95
+    top_k: 50
+    dtype: bf16
+    limit_images: 32
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.50
+    max_model_len: 17408  # 16384 prompt + 1024 response
+    max_num_batched_tokens: 32768
+    enable_chunked_prefill: true
+    enforce_eager: false
+    disable_tqdm: true
+    calculate_log_probs: true  # vLLM's sampled-token log-probs: mismatch metrics (mismatch/*)
+    val_override_config:
+      n: 1
+      temperature: 0.0
+
+  # Settings of the two frozen teacher snapshots (theta^+ updated, theta^- anchor).
+  ref:
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: false
+      enable_rank0_init: true
+      torch_dtype: bf16
+      mp_param_dtype: bf16
+      mp_reduce_dtype: fp32
+      mp_buffer_dtype: fp32
+    offload:
+      offload_params: false
+
+  reward:
+    reward_function: mesd/reward.py:compute_mesd_reward
+    reward_function_kwargs:
+      strict_metadata: true
+      spatial_iou_mode: avg
+      identity_match_mode: soft
+      spatial_norm_mode: matched
+      correct_tempgate: true
+      outcome_success_iou_threshold: 0.5
+      outcome_failure_iou_threshold: 0.0
+      outcome_temporal_mcq_strict_rkl: true
+    skip_special_tokens: true
+    num_cpus: 2
+
+trainer:
+  total_epochs: 1
+  max_steps: null
+  project_name: video_t_rsi
+  experiment_name: video_trsi_route_a_4n8g_fast  # fast
+  logger: [console, tensorboard]
+  nnodes: 4
+  n_gpus_per_node: 8
+  max_try_make_batch: 20
+  val_freq: -1
+  val_before_train: false
+  val_only: false
+  val_generations_to_log: 0
+  save_freq: 12  # fast: every 768 prompts, at the phase boundaries (base 50 x 16 = 800)
+  save_limit: 25
+  save_model_only: false
+  save_checkpoint_path: null
+  load_checkpoint_path: null
+  find_last_checkpoint: true

@@ -1,0 +1,53 @@
+# RECAST runtime: Linux + NVIDIA CUDA; reference environment uses Python 3.11.11.
+# Versions below match the working training environment reported on 2026-10-02.
+# Install with: python -m pip install -e .
+# Direct training and checkpoint export dependencies.
+# Transitive dependencies are resolved by pip; this is not a full environment lock.
+
+# vLLM rollout generation and PyTorch/FSDP training.
+# torch/torchvision versions follow vLLM 0.11.0's NVIDIA requirements:
+# https://github.com/vllm-project/vllm/blob/v0.11.0/requirements/cuda.txt
+vllm==0.11.0
+torch==2.8.0
+torchvision==0.23.0
+transformers==4.57.3
+accelerate==1.14.0
+
+# FlashAttention is required for training, installed AFTER PyTorch:
+# python -m pip install packaging==26.3 ninja==1.13.0
+# python -m pip install flash-attn==2.8.3 --no-build-isolation
+# Kept separate because its build imports torch from the active environment.
+
+# Distributed workers, batched tensors, and resumable data loading.
+ray[default]==2.56.1
+tensordict==0.13.0
+torchdata==0.11.0
+
+# Multimodal processing and image/video decoding (decord extra is required).
+qwen-vl-utils[decord]==0.0.14
+decord==0.6.0
+av==18.0.0
+pillow==12.3.0
+opencv-python-headless==5.0.0.93
+
+# Configuration, tensor utilities, data tables, and file handling.
+omegaconf==2.3.1
+PyYAML==6.0.3
+numpy==2.2.6
+einops==0.8.2
+pyarrow==25.0.0
+pandas==3.0.5
+filelock==3.32.2
+packaging==26.3
+requests==2.34.2
+
+# Task rewards and training logs.
+rouge_score==0.1.2
+codetiming==1.4.0
+loguru==0.7.3
+psutil==7.2.2
+tensorboard==2.21.0
+tqdm==4.70.0
+
+# Optional: python -m pip install wandb==0.28.1
+# Needed only when trainer.logger includes wandb; defaults use console/tensorboard.

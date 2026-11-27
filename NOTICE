@@ -1,0 +1,30 @@
+RECAST training
+
+This repository includes code and task semantics from these sources:
+
+1. RLSD (Self-Distilled RLVR), commit
+   aca313b978de4fb3a509ddf1831bf61fe597a2eb.
+   The veRL/Ray/FSDP/vLLM runtime in `verl/` starts from that release.
+   https://github.com/iie-ycx/RLSD/tree/aca313b978de4fb3a509ddf1831bf61fe597a2eb
+
+2. Open-o3-Video, commit
+   4797fd1adfd261eea821e0fcb57c876afdbc0362.
+   Student prompts, STGR task semantics, reward scoring and vision processing
+   use this Apache-2.0 release. RECAST adds its spatial-matching options and
+   the video decoder settings used by the training loader.
+   https://github.com/marinero4972/Open-o3-Video
+
+3. MeSD (Multi-Evidence Self-Distillation for VideoLLM).
+   RECAST shares evidence-conditioned prompt construction and training
+   utilities with MeSD.
+   https://github.com/WhiteVentral/MeSD-code
+
+4. VISD / Video_OPSD, commit
+   c3d54b2006c31c196ec4c5e7ab562999263c5f58.
+   The original RECAST training implementation follows its reward profile,
+   no-feedback privileged replay, top-k token discrepancy, EMA teacher and
+   curriculum settings. It is credited here as method provenance.
+   https://github.com/Koreyoshi01/VISD
+
+Original copyright notices and license headers are retained in derived source
+files. Model weights, training annotations and media have their own terms.

@@ -1,0 +1,58 @@
+[
+  {
+    "id": "synthetic-visual-001",
+    "source": "gqa",
+    "task": "visual QA",
+    "question": "Where is the person?",
+    "answer": "<obj>person</obj><box>[64, 48, 320, 432]</box>",
+    "image_path": "demo.jpg",
+    "image_size": [640, 480]
+  },
+  {
+    "id": "synthetic-spatiotemporal-001",
+    "source": "STR_plm_rdcap",
+    "task": "temporal-spatial free-form QA",
+    "question": "What does the person pick up?",
+    "answer": "The person picks up the cup.",
+    "video_path": "demo.mp4",
+    "key_frames": [{"path": "demo/frame_0003.jpg", "time": 1.0, "idx": 3}],
+    "key_items": {
+      "3": {
+        "person": [[0.1, 0.1, 0.5, 0.9]],
+        "cup": [[0.6, 0.4, 0.7, 0.6]]
+      }
+    }
+  },
+  {
+    "id": "synthetic-temporal-001",
+    "source": "timerft",
+    "task": "temporal QA",
+    "question": "When does the person pick up the cup?",
+    "answer": "[1.0, 3.0]",
+    "video_path": "demo.mp4"
+  },
+  {
+    "id": "synthetic-temporal-mcq-001",
+    "source": "STR_t",
+    "task": "temporal QA (MCQ)",
+    "question": "What does the person do, and when?\nA. Sit down\nB. Pick up the cup",
+    "answer": "B\n[1.0, 3.0]",
+    "video_path": "demo.mp4"
+  },
+  {
+    "id": "synthetic-video-mcq-001",
+    "source": "videor1_train",
+    "task": "General video QA MCQ",
+    "question": "What does the person pick up?\nA. A book\nB. A cup",
+    "answer": "B",
+    "video_path": "demo.mp4"
+  },
+  {
+    "id": "synthetic-video-freeform-001",
+    "source": "videoespresso_train_video",
+    "task": "General video QA Free-form",
+    "question": "What does the person do?",
+    "answer": "The person picks up the cup.",
+    "video_path": "demo.mp4"
+  }
+]
