@@ -2,6 +2,8 @@
 
 **Training-Based Recursive Self-Improvement in VideoLLM**
 
+[Project website](https://whiteventral.github.io/RECAST/)
+
 RECAST alternates task-reward updates with self-teacher-guided updates. Future-Aware Semantic Credit (FASC) redistributes token advantages using later semantic chunks. Outcome-Grounded Decision Refinement (ODR) scores candidate tokens by sampling their continuations.
 
 ## Training efficiency
